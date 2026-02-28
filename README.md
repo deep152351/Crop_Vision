@@ -20,7 +20,8 @@ Source: Kaggle
 Classes: 3
 
 🔗 Kaggle Dataset:
-https://www.kaggle.com/datasets/emmarex/plantdisease
+https://www.kaggle.com/datasets/emmarex/plantdisease(Potato
+_Healthy,Potato_Late_Blight,Potato_Early_Blight)
 📊 Data Preprocessing
 
 Image resizing → 180 × 180 pixels
