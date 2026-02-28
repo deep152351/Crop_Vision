@@ -54,6 +54,7 @@ Dense (256 units, ReLU)
 Dropout (0.5)
 
 Dense (3 units, Softmax)
+
 ⚙️ Hyperparameters
 Parameter	Value
 Optimizer	Adam
@@ -62,13 +63,21 @@ Loss Function	Sparse Categorical Crossentropy
 Batch Size	32
 Epochs	15
 Input Size	180×180×3
+
 📈 Results
+
 ✅ Final Performance (After 15 Epochs)
+
 Metric	Score
-Training Accuracy	91.12%
-Validation Accuracy	93.99%
-Training Loss	0.2558
-Validation Loss	0.1492
+
+Training Accuracy	89.94%
+
+Validation Accuracy	95.67%
+
+Training Loss	0.2721
+
+Validation Loss	0.1596
+
 🔎 Observations
 
 Validation accuracy slightly higher than training accuracy.
