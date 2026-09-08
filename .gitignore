@@ -1,0 +1,9 @@
+# Local-only conversion tooling and scratch outputs — not meant for GitHub.
+.convert-venv/
+saved_model_tmp/
+node_modules/
+
+# Superseded by docs/tfjs_model/ (the version actually served by the live site).
+# huggingface-space/Crop_Vision.h5 is the raw 98MB source model — keep it local.
+/tfjs_model/
+huggingface-space/

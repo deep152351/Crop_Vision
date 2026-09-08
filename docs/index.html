@@ -1,24 +1,15 @@
 <!doctype html>
-<!--
-  CropVision demo — v1 client-side heuristic.
-  Reads green vs. yellow/brown pixel coverage on an attached leaf photo to
-  estimate severity; no server, no model weights, no network calls.
-
-  Upgrade path: host the trained VGG16 model from Crop_Vision.ipynb behind a
-  small API (e.g. a free Hugging Face Space running the saved .h5 with
-  Gradio/FastAPI), then swap analyzeLeaf() below for a fetch() to that
-  endpoint — the chat UI and message flow don't need to change.
--->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>CropVision</title>
-<meta name="description" content="A WhatsApp-style chat bot that reads a crop leaf photo and gives a severity read and treatment steps — runs entirely in your browser, no server." />
+<meta name="description" content="A chat that reads a potato leaf photo and gives a diagnosis and treatment steps back, powered by an on-device VGG16 model." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Ctext%20y='.9em'%20font-size='90'%3E%F0%9F%8C%BF%3C/text%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
 <style>
   :root{
     --bg:#F4EFE3;
@@ -108,13 +99,6 @@
   }
   .feature-list b{ font-weight:600; }
   .feature-list span.sub{ display:block; color:var(--ink-muted); font-size:13px; }
-  .brand-footnote{
-    margin-top:6px; padding:14px 16px; background:var(--panel-soft);
-    border:1px solid var(--border); border-radius:12px;
-    font-size:12.5px; line-height:1.55; color:var(--ink-muted);
-  }
-  .brand-footnote b{ color:var(--ink); font-weight:600; }
-  .brand-footnote a{ color:var(--leaf-600); }
 
   /* ---------- Chat stage ---------- */
   .chat-stage{
@@ -133,6 +117,8 @@
   .chat-name{ font-weight:600; font-size:15px; }
   .chat-status{ font-size:12px; opacity:.88; display:flex; align-items:center; gap:6px; }
   .chat-status .dot{ width:7px; height:7px; border-radius:50%; background:#8FE39A; flex:none; }
+  .chat-status.loading .dot{ background:var(--amber-600); }
+  .chat-status.error .dot{ background:var(--rust-600); }
 
   .messages{ flex:1 1 auto; overflow-y:auto; padding:18px 14px; display:flex; flex-direction:column; gap:10px; background:var(--panel-soft); }
   .messages::-webkit-scrollbar{ width:8px; }
@@ -148,7 +134,6 @@
   .bubble .meta{ display:flex; gap:5px; align-items:center; justify-content:flex-end; margin-top:4px; font-family:var(--font-mono); font-size:10.5px; color:color-mix(in srgb, currentColor 55%, transparent); }
   .bubble .ticks{ color:#3FA9E0; letter-spacing:-2px; }
   .bubble img.leaf-photo{ display:block; width:100%; max-width:220px; border-radius:10px; margin-bottom:6px; }
-  .crop-tag{ display:inline-block; font-family:var(--font-mono); font-size:10.5px; padding:2px 7px; border-radius:999px; background:rgba(255,255,255,.5); margin-bottom:6px; }
 
   .typing{ display:flex; gap:4px; align-items:center; padding:4px 2px; }
   .typing span{ width:6px; height:6px; border-radius:50%; background:var(--ink-muted); animation:blink 1.2s infinite ease-in-out; }
@@ -175,10 +160,7 @@
   .diag-advice li{ padding-left:2px; }
   .diag-disclaimer{ margin-top:8px; font-size:11px; color:var(--ink-muted); border-top:1px dashed var(--border); padding-top:6px; }
 
-  .chips{ flex:none; display:flex; gap:8px; overflow-x:auto; padding:8px 12px; border-top:1px solid var(--border); background:var(--panel); }
-  .chip{ flex:none; font-family:var(--font-body); font-size:12.5px; padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:var(--panel-soft); color:var(--ink); cursor:pointer; }
-  .chip.active{ background:var(--leaf-700); border-color:var(--leaf-700); color:#fff; }
-  .chip:focus-visible, .attach-btn:focus-visible, .send-btn:focus-visible, input:focus-visible{ outline:2px solid var(--leaf-500); outline-offset:2px; }
+  .attach-btn:focus-visible, .send-btn:focus-visible, input:focus-visible{ outline:2px solid var(--leaf-500); outline-offset:2px; }
 
   .staged{ display:none; align-items:center; gap:8px; padding:8px 12px 0; background:var(--panel); }
   .staged.show{ display:flex; }
@@ -203,20 +185,16 @@
 <div class="page">
   <aside class="brand">
     <div class="brand-inner">
-      <span class="eyebrow">Crop disease AI · client-side prototype</span>
+      <span class="eyebrow">Potato leaf diagnosis</span>
       <h1 class="brand-title">Crop<em>Vision</em></h1>
-      <p class="brand-tagline">Message a photo of a crop leaf, get a health read and a treatment plan back — the way you'd text a friend, not fill out a form.</p>
+      <p class="brand-tagline">Message a photo of a potato leaf, get a diagnosis and a treatment plan back — the way you'd text a friend, not fill out a form.</p>
 
       <ul class="feature-list">
         <li><span class="ico">📷</span><span><b>Photo-in, read-out.</b><span class="sub">Attach a leaf photo in the chat, no upload forms.</span></span></li>
-        <li><span class="ico">🧮</span><span><b>Runs fully in your browser.</b><span class="sub">Pixel-pattern analysis, no server, no account, no cost.</span></span></li>
-        <li><span class="ico">📊</span><span><b>Confidence, not just a label.</b><span class="sub">Every read is scored, with a % breakdown of what it saw.</span></span></li>
+        <li><span class="ico">🧠</span><span><b>A real trained model.</b><span class="sub">VGG16 transfer learning, running entirely on your device.</span></span></li>
+        <li><span class="ico">📊</span><span><b>Confidence, not just a label.</b><span class="sub">Every read is scored, with the full probability breakdown.</span></span></li>
         <li><span class="ico">💬</span><span><b>Ask it a quick question.</b><span class="sub">Blight, watering, fungicide, prevention — try one.</span></span></li>
       </ul>
-
-      <div class="brand-footnote">
-        <b>How this prototype thinks:</b> v1 reads leaf color and lesion coverage directly in the browser (a fast, free, zero-training heuristic) rather than running the trained VGG16 model from the project notebook — that model needs a small hosted backend (e.g. a free Hugging Face Space) to serve it, which is the natural v2 upgrade behind this same chat.
-      </div>
     </div>
   </aside>
 
@@ -226,7 +204,7 @@
         <div class="avatar">🌿</div>
         <div class="chat-header-text">
           <span class="chat-name">CropVision</span>
-          <span class="chat-status"><span class="dot"></span><span>heuristic v1 · runs offline in your browser</span></span>
+          <span class="chat-status loading" id="statusLine"><span class="dot"></span><span id="statusText">loading model…</span></span>
         </div>
       </header>
 
@@ -238,18 +216,11 @@
         <button type="button" id="stagedRemove" title="Remove photo">✕</button>
       </div>
 
-      <div class="chips" id="chips">
-        <button type="button" class="chip" data-crop="Potato">🥔 Potato</button>
-        <button type="button" class="chip" data-crop="Tomato">🍅 Tomato</button>
-        <button type="button" class="chip" data-crop="Pepper">🫑 Pepper</button>
-        <button type="button" class="chip" data-crop="">🌱 Something else</button>
-      </div>
-
       <form class="composer" id="composer">
         <label class="attach-btn" for="photoInput" title="Attach a leaf photo">📷</label>
         <input type="file" id="photoInput" accept="image/jpeg,image/png,image/webp" capture="environment" hidden />
         <input type="text" id="noteInput" class="note-input" placeholder="Attach a photo, or ask a question…" autocomplete="off" />
-        <button type="submit" class="send-btn" id="sendBtn" aria-label="Send">➤</button>
+        <button type="submit" class="send-btn" id="sendBtn" aria-label="Send" disabled>➤</button>
       </form>
     </div>
   </main>
@@ -260,10 +231,12 @@
   "use strict";
 
   const messagesEl = document.getElementById('messages');
-  const chipsEl = document.getElementById('chips');
   const composer = document.getElementById('composer');
   const photoInput = document.getElementById('photoInput');
   const noteInput = document.getElementById('noteInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const statusLine = document.getElementById('statusLine');
+  const statusText = document.getElementById('statusText');
   const staged = document.getElementById('staged');
   const stagedImg = document.getElementById('stagedImg');
   const stagedName = document.getElementById('stagedName');
@@ -271,8 +244,11 @@
 
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  const IMG_SIZE = 180;
+  const CLASS_NAMES = ["Early Blight", "Late Blight", "Healthy"]; // matches train_generator.class_indices order
+
   let stagedFile = null;
-  let selectedCrop = '';
+  let model = null;
 
   function timeNow(){ return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
   function scrollToEnd(){ messagesEl.scrollTop = messagesEl.scrollHeight; }
@@ -294,12 +270,11 @@
     addRow('<div class="bubble"><p></p><div class="meta">' + timeNow() + ' <span class="ticks">✓✓</span></div></div>', 'out')
       .querySelector('p').textContent = text;
   }
-  function userPhoto(file, note, crop){
+  function userPhoto(file, note){
     const url = URL.createObjectURL(file);
     const row = addRow(
       '<div class="bubble">' +
-        (crop ? '<span class="crop-tag">' + crop + '</span><br/>' : '') +
-        '<img class="leaf-photo" alt="Leaf photo sent for analysis" />' +
+        '<img class="leaf-photo" alt="Leaf photo sent for diagnosis" />' +
         (note ? '<p></p>' : '') +
         '<div class="meta">' + timeNow() + ' <span class="ticks">✓✓</span></div>' +
       '</div>', 'out'
@@ -315,17 +290,6 @@
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
-
-  // ---------- chips ----------
-  chipsEl.addEventListener('click', (e) => {
-    const btn = e.target.closest('.chip');
-    if (!btn) return;
-    const crop = btn.dataset.crop || '';
-    const alreadyActive = btn.classList.contains('active');
-    [...chipsEl.querySelectorAll('.chip')].forEach(c => c.classList.remove('active'));
-    if (!alreadyActive){ btn.classList.add('active'); selectedCrop = crop; }
-    else { selectedCrop = ''; }
-  });
 
   // ---------- staged photo ----------
   photoInput.addEventListener('change', () => {
@@ -344,7 +308,7 @@
     noteInput.placeholder = 'Attach a photo, or ask a question…';
   });
 
-  // ---------- heuristic leaf analysis (client-side, no server) ----------
+  // ---------- real model inference (VGG16, converted to TF.js, on-device) ----------
   function loadImage(file){
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -354,140 +318,73 @@
     });
   }
 
-  function rgbToHsl(r, g, b){
-    r /= 255; g /= 255; b /= 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b);
-    let h = 0, s = 0; const l = (max + min) / 2;
-    if (max !== min){
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      switch (max){
-        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-        case g: h = (b - r) / d + 2; break;
-        default: h = (r - g) / d + 4;
-      }
-      h /= 6;
-    }
-    return [h * 360, s, l];
-  }
+  const ADVICE = {
+    "Early Blight": [
+      "Remove and destroy the affected leaves — don't compost them.",
+      "Improve airflow: space plants out, avoid overhead watering.",
+      "A copper-based or locally recommended fungicide is a reasonable next step."
+    ],
+    "Late Blight": [
+      "Act quickly — late blight spreads fast in cool, humid weather.",
+      "Remove and destroy affected plants; do not compost.",
+      "Apply a suitable fungicide as soon as possible and check neighboring plants."
+    ],
+    "Healthy": [
+      "No action needed — keep up the current watering and spacing.",
+      "Recheck weekly, especially after rain or humid stretches."
+    ]
+  };
+  const TONE = { "Early Blight": "warn", "Late Blight": "danger", "Healthy": "good" };
 
-  async function analyzeLeaf(file){
+  async function classifyLeaf(file){
     const img = await loadImage(file);
-    const maxSide = 220;
-    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-    const w = Math.max(1, Math.round(img.naturalWidth * scale));
-    const h = Math.max(1, Math.round(img.naturalHeight * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0, w, h);
-    const { data } = ctx.getImageData(0, 0, w, h);
+    const scores = tf.tidy(() => {
+      const input = tf.browser.fromPixels(img)
+        .resizeBilinear([IMG_SIZE, IMG_SIZE])
+        .toFloat()
+        .div(255.0)
+        .expandDims(0);
+      return model.execute(input);
+    });
+    const data = await scores.data();
+    scores.dispose();
 
-    let total = 0, healthy = 0, yellow = 0, brown = 0, dark = 0;
-    for (let i = 0; i < data.length; i += 4){
-      const a = data[i + 3];
-      if (a < 16) continue;
-      total++;
-      const [hue, sat, light] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
-      if (sat < 0.14 && light > 0.82) continue; // near-white background / glare
-      if (light < 0.07) { dark++; continue; }    // near-black lesion / shadow
-      if (hue >= 70 && hue <= 170 && sat > 0.14) { healthy++; continue; } // green
-      if (hue >= 35 && hue < 70) { yellow++; continue; }                 // yellow/chlorotic
-      if ((hue < 35 || hue >= 340) && light < 0.6) { brown++; continue; } // brown/rust necrotic
-      // anything else (soil, pot, sky) is treated as background and excluded from "leaf"
-      total--;
-    }
-
-    const leaf = healthy + yellow + brown + dark;
-    const leafFraction = total > 0 ? leaf / (leaf + (total - leaf)) : 0;
-
-    if (leaf < 40 || leafFraction < 0.10){
-      return { lowSignal: true };
-    }
-
-    const affected = yellow + brown + dark;
-    const affectedRatio = affected / leaf;
-    const pct = (n) => Math.round((n / leaf) * 100);
-
-    let severity, tone;
-    if (affectedRatio < 0.06) { severity = 'none'; tone = 'good'; }
-    else if (affectedRatio < 0.18) { severity = 'mild'; tone = 'warn'; }
-    else if (affectedRatio < 0.38) { severity = 'moderate'; tone = 'warn'; }
-    else { severity = 'severe'; tone = 'danger'; }
-
-    const brownLed = brown + dark >= yellow;
-    let condition;
-    if (severity === 'none') condition = 'Looks healthy';
-    else if (severity === 'mild') condition = brownLed ? 'Early leaf stress' : 'Mild yellowing';
-    else if (severity === 'moderate') condition = brownLed ? 'Advancing leaf stress' : 'Moderate chlorosis';
-    else condition = brownLed ? 'Severe leaf necrosis' : 'Severe yellowing';
-
-    const confidence = leafFraction > 0.4 ? 'medium' : leafFraction > 0.2 ? 'low-medium' : 'low';
-
-    const adviceMap = {
-      none: [
-        'Keep up the current watering and spacing — nothing concerning here.',
-        'Water at the base, not over the leaves, to keep foliage dry.',
-        'Recheck weekly, especially right after rain.'
-      ],
-      mild: [
-        "Pull off the affected leaves and bin them — don't compost.",
-        'Space plants out or trim nearby growth to improve airflow.',
-        'Avoid wetting the leaves when watering.',
-        'Recheck in 3-4 days to see if it is spreading.'
-      ],
-      moderate: [
-        'Remove the worst-affected leaves now to slow the spread.',
-        'A copper-based or locally recommended fungicide is a reasonable next step — follow the label.',
-        'Improve spacing and airflow; skip overhead irrigation.',
-        'Flag this plant and check it again in a couple of days.'
-      ],
-      severe: [
-        "Remove and destroy the worst leaves or plants — don't compost.",
-        'Treat with a suitable fungicide as soon as you can.',
-        'Check neighboring plants closely — blight spreads fast in humid weather.',
-        'For a field crop, loop in a local agronomist before the next planting cycle.'
-      ]
-    };
-
-    return {
-      lowSignal: false,
-      condition, severity, tone, confidence,
-      breakdown: { healthy: pct(healthy), yellow: pct(yellow), brown: pct(brown + dark) },
-      advice: adviceMap[severity]
-    };
+    const results = CLASS_NAMES.map((name, i) => ({ name, score: data[i] }))
+      .sort((a, b) => b.score - a.score);
+    return { top: results[0], all: results };
   }
 
-  function renderDiagnosis(result, crop){
-    if (result.lowSignal){
-      botText("I couldn't find enough leaf in that photo to read it well — try filling more of the frame with the leaf, in even light, against a plain background.");
-      return;
-    }
-    const pillLabel = result.severity.toUpperCase();
+  function renderDiagnosis(result){
+    const { top, all } = result;
+    const tone = TONE[top.name] || 'warn';
+    const confidencePct = Math.round(top.score * 100);
+    const breakdown = all.map(r => r.name + ' ' + Math.round(r.score * 100) + '%').join(' · ');
+    const advice = ADVICE[top.name] || [];
+    const lowConfidence = top.score < 0.45;
+
     const html =
       '<div class="bubble diag-card">' +
-        '<div class="diag-top"><span class="diag-crop">' + escapeHtml(crop || 'Unspecified crop') + '</span>' +
-          '<span class="pill pill-' + result.tone + '">' + escapeHtml(pillLabel) + '</span></div>' +
-        '<div class="diag-condition ' + result.tone + '">' + escapeHtml(result.condition) + '</div>' +
-        '<div class="diag-confidence">confidence: ' + result.confidence + '</div>' +
-        '<div class="diag-breakdown">green ' + result.breakdown.healthy + '% · yellow ' + result.breakdown.yellow + '% · brown/necrotic ' + result.breakdown.brown + '%</div>' +
-        '<ol class="diag-advice">' + result.advice.map(a => '<li>' + escapeHtml(a) + '</li>').join('') + '</ol>' +
-        '<div class="diag-disclaimer">Heuristic color read, v1 — not a lab diagnosis. See a local agronomist to confirm before treating at scale.</div>' +
+        '<div class="diag-top"><span class="diag-crop">Potato leaf</span>' +
+          '<span class="pill pill-' + tone + '">' + confidencePct + '% confident</span></div>' +
+        '<div class="diag-condition ' + tone + '">' + escapeHtml(top.name) + '</div>' +
+        '<div class="diag-breakdown">' + escapeHtml(breakdown) + '</div>' +
+        (lowConfidence ? '<div class="diag-summary">The three scores are close — a clearer, closer photo would help pin this down.</div>' : '') +
+        '<ol class="diag-advice">' + advice.map(a => '<li>' + escapeHtml(a) + '</li>').join('') + '</ol>' +
+        '<div class="diag-disclaimer">For guidance only — confirm with a local agronomist before treating at scale.</div>' +
         '<div class="meta">' + timeNow() + '</div>' +
       '</div>';
     addRow(html, 'in');
   }
 
-  async function handlePhoto(file, note, crop){
+  async function handlePhoto(file){
     showTyping();
-    // brief pause so the typing indicator reads as "working", not instant
-    await new Promise(r => setTimeout(r, reduceMotion ? 0 : 500));
     try {
-      const result = await analyzeLeaf(file);
+      const result = await classifyLeaf(file);
       hideTyping();
-      renderDiagnosis(result, crop);
+      renderDiagnosis(result);
     } catch (err) {
       hideTyping();
+      console.error(err);
       botText("I couldn't read that image — try a JPG, PNG or WEBP file.");
     }
   }
@@ -498,16 +395,15 @@
     { keys: ['water', 'watering', 'irrigat'], reply: 'Water at the base, not over the leaves — wet foliage is what lets fungal spots spread from plant to plant.' },
     { keys: ['fungicide', 'spray', 'chemical'], reply: 'Copper-based fungicides are a common first step for fungal-looking leaf spots — always follow the product label and local guidance.' },
     { keys: ['prevent', 'avoid', 'stop it'], reply: 'Good spacing, dry foliage, and rotating crops each season are the cheapest prevention — most leaf disease needs standing moisture to take hold.' },
-    { keys: ['tomato'], reply: 'Tomatoes get early/late blight and bacterial spot too — the same photo check works, just tap the Tomato chip first.' },
-    { keys: ['potato'], reply: 'Potato is what this demo was originally tuned around — early blight, late blight, and healthy are the classic three.' },
-    { keys: ['pepper'], reply: 'Peppers mostly show bacterial spot or sunscald rather than blight — send a photo and I\'ll estimate the affected area either way.' },
-    { keys: ['hi', 'hello', 'hey'], reply: 'Hey! Attach a leaf photo any time and I\'ll read it, or ask about blight, watering, fungicide, or prevention.' },
-    { keys: ['who are you', 'what are you', 'how do you work', 'how does this work'], reply: 'I\'m a client-side demo — I look at the mix of green vs. yellow/brown pixels in your photo and turn that into a severity read. No server, no account.' }
+    { keys: ['tomato', 'pepper', 'other crop', 'other plant'], reply: 'Right now I only read potato leaves — early blight, late blight, or healthy. Other crops are on the roadmap.' },
+    { keys: ['potato'], reply: 'Potato is what I\'m trained on — early blight, late blight, and healthy are the three I can tell apart.' },
+    { keys: ['hi', 'hello', 'hey'], reply: 'Hey! Attach a potato leaf photo any time and I\'ll read it, or ask about blight, watering, fungicide, or prevention.' },
+    { keys: ['who are you', 'what are you', 'how do you work', 'how does this work'], reply: 'I\'m a VGG16 model trained on labeled potato leaf photos, running entirely on your device — no server, no account.' }
   ];
   function ruleReply(text){
     const t = text.toLowerCase();
     for (const f of FAQ){ if (f.keys.some(k => t.includes(k))) return f.reply; }
-    return "I mainly read leaf photos rather than open chat — attach one and I'll estimate its condition. You can also ask me about: blight, watering, fungicide, or prevention.";
+    return "I mainly read potato leaf photos rather than open chat — attach one and I'll diagnose it. You can also ask me about: blight, watering, fungicide, or prevention.";
   }
 
   // ---------- send ----------
@@ -516,14 +412,14 @@
     const note = noteInput.value.trim();
 
     if (stagedFile){
-      const file = stagedFile, crop = selectedCrop;
-      userPhoto(file, note, crop);
+      const file = stagedFile;
+      userPhoto(file, note);
       stagedFile = null;
       photoInput.value = '';
       staged.classList.remove('show');
       noteInput.value = '';
       noteInput.placeholder = 'Attach a photo, or ask a question…';
-      handlePhoto(file, note, crop);
+      handlePhoto(file);
       return;
     }
 
@@ -542,12 +438,27 @@
   function greet(){
     const lines = [
       "Hi 👋 I'm CropVision.",
-      "Send me a photo of a crop leaf and I'll read it — condition, severity, and what to do about it.",
-      "Everything here runs offline in your browser, right now, for free — no account, no upload to a server."
+      "Send me a photo of a potato leaf and I'll read it — condition, confidence, and what to do next."
     ];
     lines.forEach((line, i) => setTimeout(() => botText(line), reduceMotion ? 0 : i * 450));
   }
   greet();
+
+  // ---------- model boot ----------
+  async function boot(){
+    try {
+      model = await tf.loadGraphModel('./tfjs_model/model.json');
+      statusLine.className = 'chat-status';
+      statusText.textContent = 'ready';
+      sendBtn.disabled = false;
+    } catch (err) {
+      console.error(err);
+      statusLine.className = 'chat-status error';
+      statusText.textContent = 'model failed to load';
+      botText("I couldn't load the model just now — refresh the page to try again.");
+    }
+  }
+  boot();
 })();
 </script>
 </body>

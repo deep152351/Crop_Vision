@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>CropVision — model test</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 20px; }
+  #status { color: #666; font-size: 14px; margin-bottom: 16px; }
+  #status.ready { color: #2f6b3d; font-weight: 600; }
+  #status.error { color: #a8442b; font-weight: 600; }
+  input[type=file] { margin: 16px 0; }
+  #preview { max-width: 240px; display: block; margin: 12px 0; border-radius: 8px; border: 1px solid #ddd; }
+  table { border-collapse: collapse; margin-top: 12px; width: 100%; }
+  td, th { text-align: left; padding: 6px 10px; border-bottom: 1px solid #eee; font-size: 14px; }
+  .bar { background: #e4f0e1; border-radius: 4px; height: 8px; overflow: hidden; }
+  .bar-fill { background: #2f6b3d; height: 100%; }
+  #result { display: none; }
+</style>
+</head>
+<body>
+  <h1>CropVision — real model test (local only)</h1>
+  <div id="status">Loading model…</div>
+  <input type="file" id="fileInput" accept="image/*" disabled />
+  <img id="preview" style="display:none" alt="preview" />
+  <div id="result">
+    <table>
+      <thead><tr><th>Class</th><th>Probability</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+<script>
+const IMG_SIZE = 180;
+const CLASS_NAMES = ["Early Blight", "Late Blight", "Healthy"]; // matches train_generator.class_indices order
+
+const statusEl = document.getElementById('status');
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+const resultEl = document.getElementById('result');
+const rowsEl = document.getElementById('rows');
+
+let model = null;
+
+async function loadModel() {
+  try {
+    model = await tf.loadGraphModel('./tfjs_model/model.json');
+    statusEl.textContent = 'Model loaded — pick a potato leaf photo.';
+    statusEl.className = 'ready';
+    fileInput.disabled = false;
+  } catch (err) {
+    statusEl.textContent = 'Failed to load model: ' + err.message + ' (open this file via a local server, not double-clicked — see terminal instructions)';
+    statusEl.className = 'error';
+    console.error(err);
+  }
+}
+
+async function predict(file) {
+  const img = await new Promise((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = reject;
+    el.src = URL.createObjectURL(file);
+  });
+  preview.src = img.src;
+  preview.style.display = 'block';
+
+  const tensor = tf.tidy(() => {
+    return tf.browser.fromPixels(img)
+      .resizeBilinear([IMG_SIZE, IMG_SIZE])
+      .toFloat()
+      .div(255.0)
+      .expandDims(0);
+  });
+
+  const output = model.execute(tensor);
+  const scores = await output.data();
+  tensor.dispose();
+  output.dispose();
+
+  const rows = CLASS_NAMES.map((name, i) => ({ name, score: scores[i] }))
+    .sort((a, b) => b.score - a.score);
+
+  rowsEl.innerHTML = rows.map(r => `
+    <tr>
+      <td>${r.name}</td>
+      <td>${(r.score * 100).toFixed(1)}%</td>
+      <td style="width:120px"><div class="bar"><div class="bar-fill" style="width:${(r.score*100).toFixed(1)}%"></div></div></td>
+    </tr>
+  `).join('');
+  resultEl.style.display = 'block';
+}
+
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files[0];
+  if (f) predict(f).catch(err => { statusEl.textContent = 'Prediction failed: ' + err.message; statusEl.className = 'error'; console.error(err); });
+});
+
+loadModel();
+</script>
+</body>
+</html>
