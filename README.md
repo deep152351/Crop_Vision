@@ -1,5 +1,7 @@
 # Crop_Vision
 
+🔗 **Live demo:** https://deep152351.github.io/Crop_Vision/ — a WhatsApp-style chat where you attach a leaf photo and get a severity read + treatment steps back. Runs entirely client-side (`docs/index.html`) on a lightweight color-heuristic v1; see that file's header comment for the plan to swap in the trained VGG16 model behind a small hosted backend.
+
 📌 Overview
 
 Early detection of plant diseases plays a critical role in improving crop productivity and ensuring food security. This project builds an automated potato leaf disease classification system using Deep Transfer Learning with VGG16, a pre-trained CNN model from ImageNet.
